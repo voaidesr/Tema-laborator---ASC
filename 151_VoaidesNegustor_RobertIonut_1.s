@@ -255,7 +255,7 @@
             pushl %ecx
             pushl %ebx
             pushl $formatPrintf2 # afisam id: ((0, 0), (0, 0))
-            # call printf
+            call printf
             addl $8, %esp
             popl %ecx
             jmp et_exit_find_sequence
