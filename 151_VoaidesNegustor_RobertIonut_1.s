@@ -9,17 +9,162 @@
     i: .long 0
     j: .long 0
     k: .long 0
+    FD: .long 0
+    sizeReal: .long 0
     length: .long 0
     numberOfOperations: .long 0
     codification: .long 0
+    dirPointer: .long 0 
+    entryPointer: .long 0
+    directory: .space 256, 0
+    file: .space 256, 0
+    fileStat:       .space 96, 0
     formatScanf: .asciz "%ld"
+    formatScanfPath: .asciz "%s"
     formatPrintf1: .asciz "%ld: ((%ld, %ld), (%ld, %ld))\n"
     formatPrintf2: .asciz "%ld: ((0, 0), (0, 0))\n"
     formatPrintf3: .asciz "((%ld, %ld), (%ld, %ld))\n"
     formatPrintf4: .asciz "((0, 0), (0, 0))\n"
     formatPrintf5: .asciz "%ld "
+    formatConcrete1: .asciz "%d\n%d\n"
+    formatPath: .asciz "%s/%s"
+    errOpenDir: .asciz "Failed to open directory\n"
+    errOpenFile: .asciz "Failed to open file\n"
+    errFstat: .asciz "Failed to get file stats\n"
+    strDot: .asciz "."
+    strDotDot: .asciz ".."
+    format124: .asciz "ID: %ld, size: %ld\n"
 .text
+    func_ADD_1:
+        pushl %ebp
+        movl %esp, %ebp
+        pushl %ebx
 
+        # ID-ul va fi, de fapt, FD
+        movl FD, %eax
+        movl size(,%eax,4), %ecx
+        cmp $0, %ecx
+        jne et_print_0
+
+        xorl %edx, %edx
+        movl sizeReal, %eax
+        addl $7, %eax
+        movl $8, %ebx
+        divl %ebx
+        movl FD, %ebx
+
+        cmp $1, %eax
+        jle et_print_0
+
+        movl %eax, size(, %ebx, 4)
+
+        xorl %eax, %eax
+        movl %eax, i
+
+        et_find_1_i:
+            movl i, %eax
+            cmp $1024, %eax
+            jae et_no_seq_1
+
+            xorl %eax, %eax
+            movl %eax, length
+            movl %eax, j 
+            et_find_1_j:
+                movl j, %eax
+                cmp $1024, %eax
+                jae et_exit_1_j
+
+                xorl %edx, %edx
+                movl i, %eax
+                movl $1024, %ebx
+                mull %ebx # eax = i * 1024
+                addl j, %eax
+
+                xorl %ebx, %ebx
+                movb memory(,%eax,1), %bl
+
+                cmpb $0, %bl
+                jne et_else_find_1
+
+                et_if_then_1:
+                incl length
+                movl length, %eax
+                movl FD, %ebx
+                cmp size(,%ebx,4), %eax
+                je et_seq_1
+                incl j
+                jmp et_find_1_j
+
+                et_else_find_1:
+                xorl %eax, %eax
+                movl %eax, length
+                incl j
+                jmp et_find_1_j
+
+            et_exit_1_j:
+            incl i
+            jmp et_find_1_i
+
+        et_seq_1:
+        movl j, %eax
+        movl FD, %ebx
+        movl size(,%ebx,4), %edx
+        subl %edx, %eax
+        addl $1, %eax
+        pushl %ecx
+        pushl j
+        pushl i
+        pushl %eax # j - size + 1
+        pushl i
+        pushl FD
+        pushl $formatPrintf1
+        call printf
+        addl $12, %esp
+        popl %eax
+        addl $8, %esp
+        popl %ecx
+
+        et_fill_1:
+        pushl %ecx
+        movl %eax, %ecx
+
+        et_for_fill_1:
+        cmpl j, %ecx
+        ja et_fill_exit_1
+
+        xorl %edx, %edx
+        movl i, %eax
+        movl $1024, %ebx
+        mull %ebx
+        addl %ecx, %eax
+
+        xorl %ebx, %ebx
+        movb FD, %bl
+        movb %bl, memory(,%eax,1)
+
+        incl %ecx
+        jmp et_for_fill_1
+
+        et_fill_exit_1:
+        popl %ecx
+        jmp exit_add_1
+
+        et_no_seq_1:
+        movl FD, %ebx
+        xorl %eax, %eax
+        movl %eax, size(,%ebx,4)
+
+        et_print_0:
+            pushl FD
+            pushl $formatPrintf2
+            call printf
+            addl $8, %esp
+
+        exit_add_1:
+        popl %ebx
+        popl %ebp
+        ret
+    
     # definim functia getIndex(ID, i, j)
     getIndex:
         pushl %ebp
@@ -561,6 +706,138 @@
         popl %ebp
         ret
 
+    func_CONCRETE:
+        pushl %ebp
+        movl %esp, %ebp
+        pushl %ebx
+
+        pushl $directory
+        pushl $formatScanfPath
+        call scanf
+        addl $8, %esp
+
+        # dirPointer = opendir(directory)
+        pushl $directory
+        call opendir
+        addl $4, %esp
+        cmpl $0, %eax
+        je et_err_opendir
+        movl %eax, dirPointer
+
+        et_read_loop:
+            pushl dirPointer
+            call readdir
+            addl $4, %esp
+            cmpl $0, %eax
+            je et_close_dir
+            movl %eax, entryPointer
+
+            # skip "."
+            movl entryPointer, %eax
+            addl $11, %eax                
+            pushl $strDot                 
+            pushl %eax                    
+            call strcmp
+            addl $8, %esp
+            testl %eax, %eax
+            je et_read_loop
+
+            # skip ".."
+            movl entryPointer, %eax
+            addl $11, %eax
+            pushl $strDotDot
+            pushl %eax
+            call strcmp
+            addl $8, %esp
+            testl %eax, %eax
+            je et_read_loop
+
+            movl entryPointer, %eax
+            addl $11, %eax                
+            pushl %eax                    
+            pushl $directory             
+            pushl $formatPath        
+            pushl $256                    
+            pushl $file                   
+            call snprintf
+            addl $20, %esp
+
+            pushl $0 # O_RDONLY = 0
+            pushl $file
+            call open
+            addl $8, %esp
+            cmpl $0, %eax
+            jl et_err_openfile
+            movl %eax, %ebx   # fd
+            movl %eax, FD
+
+            pushl $fileStat
+            pushl %ebx
+            call fstat
+            addl $8, %esp
+            cmpl $0, %eax
+            jl et_err_fstat
+
+            # size in sizeReal
+            movl fileStat+44, %eax
+            xorl %edx, %edx
+            movl $1024, %ebx
+            divl %ebx
+            movl %eax, sizeReal
+
+            movl FD, %eax
+            xorl %edx, %edx
+            movl $255, %ebx
+            divl %ebx # edx = ebx % 255
+            addl $1, %edx
+            movl %edx, FD
+
+            pushl sizeReal
+            pushl FD
+            pushl $formatConcrete1
+            call printf
+            addl $12, %esp
+
+            call func_ADD_1
+
+            jmp et_read_loop
+
+        et_err_opendir:
+            pushl $errOpenDir
+            call perror
+            addl $4, %esp
+            movl $1, %eax
+            jmp et_exit_concrete
+
+        et_err_openfile:
+            pushl $errOpenFile
+            call perror
+            addl $4, %esp
+            movl $1, %eax
+            jmp et_exit_concrete
+
+        et_err_fstat:
+            pushl $errFstat
+            call perror
+            addl $4, %esp
+            # close(fd) in %ebx
+            pushl %ebx
+            call close
+            addl $4, %esp
+            movl $1, %eax
+            jmp et_exit_concrete
+
+        et_close_dir:
+            pushl dirPointer
+            call closedir
+            addl $4, %esp
+            movl $0, %eax
+
+        et_exit_concrete:
+            popl %ebx
+            popl %ebp
+            ret
+
 .global main
 main:
     # read the number of operations
@@ -594,6 +871,9 @@ main:
         cmp $4, %ebx
         je et_defrag
 
+        cmp $5, %ebx
+        je et_concrete
+
         et_add:
             pushl %ecx
             call func_ADD
@@ -618,6 +898,13 @@ main:
         et_defrag:
             pushl %ecx
             call func_DEFRAG
+            popl %ecx
+            incl %ecx
+            jmp et_loop_main
+
+        et_concrete:
+            pushl %ecx
+            call func_CONCRETE
             popl %ecx
             incl %ecx
             jmp et_loop_main
